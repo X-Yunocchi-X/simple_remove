@@ -5,7 +5,7 @@ pub const Remover = struct {
     args: []const [:0]u8,
 
     pub fn new(args: []const [:0]u8) !Remover {
-        const path = std.os.getenv("HOMEii") orelse return error.HomeNotFound;
+        const path = std.os.getenv("HOME") orelse return error.HomeNotFound;
         var buffer: [100]u8 = undefined;
         const trash_path = try std.fmt.bufPrint(buffer[0..], "{s}{s}", .{ path, "/.local/share/Trash/" });
 
