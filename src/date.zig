@@ -1,5 +1,6 @@
 const std = @import("std");
 
+// todo: TimeZone
 pub const Date = struct {
     year: u16,
     month: u4,
@@ -9,7 +10,7 @@ pub const Date = struct {
     second: u6,
 
     pub fn new(secs: i64) Date {
-        const epoch = std.time.epoch.EpochSeconds{ .secs = secs };
+        const epoch = std.time.epoch.EpochSeconds{ .secs = @intCast(secs) };
         const epoch_day = epoch.getEpochDay();
         const year_day = epoch_day.calculateYearDay();
         const month_day = year_day.calculateMonthDay();
