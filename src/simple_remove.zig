@@ -9,10 +9,10 @@ const Allocator = std.mem.Allocator;
 
 pub const Remover = struct {
     trash_dir: Dir,
-    args: []const [:0]u8,
+    args: []const []u8,
     allocator: std.mem.Allocator,
 
-    pub fn new(args: []const [:0]u8, allocator: std.mem.Allocator) !Remover {
+    pub fn new(args: []const []u8, allocator: std.mem.Allocator) !Remover {
         const home = std.os.getenv("HOME") orelse return error.HomeNotFound;
         const trash_path = try std.fmt.allocPrint(allocator, "{s}{s}", .{ home, "/.local/share/Trash/" });
         defer allocator.free(trash_path);
@@ -25,12 +25,67 @@ pub const Remover = struct {
         self.trash_dir.close();
     }
 
-    pub fn createFileInfo(self: Remover, path: []const u8) !void {
+    pub fn remove(self: Remover, path: []const u8) !void {
+        const stat = try std.fs.cwd().statFile(path);
+        switch (stat.kind) {
+            .directory => {
+                std.debug.print("target {s} is {s}\n", .{ path, @tagName(stat.kind) });
+                self.createDirCache(path);
+            },
+            .file => {
+                std.debug.print("target {s} is {s}\n", .{ path, @tagName(stat.kind) });
+            },
+            else => {
+                std.debug.print("target is {s}\n", .{@tagName(stat.kind)});
+                return error.TargetNotSupported;
+            },
+        }
+        try self.createInfo(path);
+        const file_name = std.fs.path.basename(path);
+        var bin_dir = try self.trash_dir.openDir("files", .{});
+        const bin_path = try bin_dir.realpathAlloc(self.allocator, ".");
+        const destination = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{ bin_path, file_name });
+        defer {
+            bin_dir.close();
+            self.allocator.free(bin_path);
+            self.allocator.free(destination);
+        }
+        std.debug.print("destination: {s}\n", .{destination});
+        try std.fs.renameAbsolute(path, destination);
+    }
+
+    pub fn createDirCache(self: Remover, path: []const u8) !void {
+        var file = try self.trash_dir.createFile("directorysizes", .{
+            .truncate = false,
+        });
+        const tuple = try getDirCache(path);
+        const file_name = std.fs.path.basename(path);
+        const cache_str = try std.fmt.allocPrint(self.allocator, "{d} {d} {s}\n", .{ tuple[0], tuple[1], file_name });
+        _ = try file.write(cache_str);
+        defer {
+            file.close();
+            self.allocator.free(cache_str);
+        }
+    }
+
+    // return (file_size, modified_time)
+    // it is important to know that the modified_time is the time when dir. modified in $TRASH/files, not the inode.modified_time
+    // but this function is used to move the file to trash, so just return current timestamp
+    // it is used to calculate the directory size
+    fn getDirCache(path: []const u8) !struct { u64, u64 } {
+        var dir = try std.fs.cwd().openDir(path, .{});
+        defer {
+            dir.close();
+        }
+        const dir_stat = try dir.statFile(".");
+        return .{ dir_stat.size, @intCast(std.time.timestamp()) };
+    }
+
+    fn createInfo(self: Remover, path: []const u8) !void {
         const file_name = std.fs.path.basename(path);
         var info_dir = try self.trash_dir.openDir("info", .{});
         defer info_dir.close();
 
-        std.debug.print("file name: {s}\n", .{file_name});
         const trash_path = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ file_name, ".trashinfo" });
         defer self.allocator.free(trash_path);
         var file = try info_dir.createFile(trash_path, .{});

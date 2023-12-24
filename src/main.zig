@@ -16,7 +16,7 @@ pub fn main() !void {
         }
         return err;
     };
-    try remover.createFileInfo("/home/yuno/Downloads/projects.pdf");
+    try remover.createDirCache("/home/yuno/Downloads/code");
     remover.deinit();
 }
 
