@@ -13,7 +13,7 @@ pub const Remover = struct {
     allocator: std.mem.Allocator,
 
     pub fn new(args: []const []u8, allocator: std.mem.Allocator) !Remover {
-        const home = std.os.getenv("HOME") orelse return error.HomeNotFound;
+        const home: []const u8 = std.os.getenv("HOME") orelse return error.HomeNotFound;
         const trash_path = try std.fmt.allocPrint(allocator, "{s}{s}", .{ home, "/.local/share/Trash/" });
         defer allocator.free(trash_path);
         var trash_dir = try std.fs.openDirAbsolute(trash_path, .{ .access_sub_paths = true });
@@ -21,17 +21,48 @@ pub const Remover = struct {
         return Remover{ .trash_dir = trash_dir, .args = args, .allocator = allocator };
     }
 
+    // todo: currently not support -r -f arguments
+    pub fn execute(self: Remover) !void {
+        for (self.args) |arg| {
+            // const eql = std.mem.eql;
+            // const isArg = eql(u8, "-r", arg) or eql(u8, "-f", arg) or eql(u8, "-rf", arg);
+            var absolute_path = arg;
+            var need_free = false;
+
+            std.debug.print("arg is {s}\n", .{arg});
+
+            const isArg = false;
+            if (isArg) {
+                // todo
+            } else {
+                if (!std.fs.path.isAbsolute(arg)) {
+                    const cwd_path = try std.fs.cwd().realpathAlloc(self.allocator, ".");
+                    defer self.allocator.free(cwd_path);
+                    const paths: []const []const u8 = &[_][]u8{ cwd_path, arg };
+                    // std.debug.print("{any}\n", .{paths});
+                    absolute_path = try std.fs.path.join(self.allocator, paths);
+                    need_free = true;
+                }
+            }
+            std.debug.print("absolute path: {s}\n", .{absolute_path});
+            try self.remove(absolute_path);
+            if (need_free) {
+                self.allocator.free(absolute_path);
+            }
+        }
+    }
+
     pub fn deinit(self: *Remover) void {
         self.trash_dir.close();
     }
 
-    pub fn remove(self: Remover, path: []const u8) !void {
+    fn remove(self: Remover, path: []const u8) !void {
         try self.createInfo(path);
         const stat = try std.fs.cwd().statFile(path);
         switch (stat.kind) {
             .directory => {
                 std.debug.print("target {s} is {s}\n", .{ path, @tagName(stat.kind) });
-                self.createDirCache(path);
+                try self.createDirCache(path);
             },
             .file => {
                 std.debug.print("target {s} is {s}\n", .{ path, @tagName(stat.kind) });
@@ -55,17 +86,17 @@ pub const Remover = struct {
     }
 
     // used after createInfo method invoked
-    pub fn createDirCache(self: Remover, path: []const u8) !void {
+    fn createDirCache(self: Remover, path: []const u8) !void {
         var file = try self.trash_dir.createFile("directorysizes", .{
             .truncate = false,
         });
         var target_dir = try std.fs.cwd().openIterableDir(path, .{});
         const file_name = std.fs.path.basename(path);
         const trash_path = try self.trash_dir.realpathAlloc(self.allocator, ".");
-        const info_path = std.fmt.allocPrint(self.allocator, "{}/info/{}.{}", .{ trash_path, file_name, "trashinfo" });
+        const info_path = try std.fmt.allocPrint(self.allocator, "{s}/info/{s}.{s}", .{ trash_path, file_name, "trashinfo" });
         var info_file = try std.fs.cwd().openFile(info_path, .{});
-        const mtime = getInfoModifiedTime(&info_file);
-        const dir_size = calculateDirSize(&target_dir);
+        const mtime = try getInfoModifiedTime(&info_file);
+        const dir_size = try calculateDirSize(&target_dir, self.allocator);
         const cache_str = try std.fmt.allocPrint(self.allocator, "{d} {d} {s}\n", .{ dir_size, mtime, file_name });
         _ = try file.write(cache_str);
         defer {
@@ -87,10 +118,22 @@ pub const Remover = struct {
     fn calculateDirSize(dir: *std.fs.IterableDir, allocator: std.mem.Allocator) !u64 {
         var size = @as(u64, 0);
 
-        const stat = try dir.dir.stat();
-        size += stat.size;
         var walker = try dir.walk(allocator);
-        _ = walker;
+        defer walker.deinit();
+
+        while (try walker.next()) |entry| {
+            switch (entry.kind) {
+                .directory => {
+                    continue;
+                },
+                .file => {
+                    const tmp_stat = try entry.dir.statFile(entry.basename);
+                    size += tmp_stat.size;
+                },
+                else => return error.FileNotSupported,
+            }
+        }
+
         return size;
     }
 
