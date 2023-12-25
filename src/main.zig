@@ -18,6 +18,21 @@ pub fn main() !void {
     };
     try remover.createDirCache("/home/yuno/Downloads/code");
     remover.deinit();
+
+    // var dir = try std.fs.cwd().openIterableDir("/home/yuno/Downloads/aws", .{});
+    // defer dir.close();
+    // var walker = try dir.walk(allocator);
+    // defer walker.deinit();
+    // while (try walker.next()) |entry| {
+    //     inline for (std.meta.fields(@TypeOf(entry))) |f| {
+    //         if (f.type != []const u8 and f.type != []u8) {
+    //             std.debug.print(f.name ++ " {any}\n", .{@as(f.type, @field(entry, f.name))});
+    //             // std.debug.print("type: {}\n", .{f.type});
+    //         } else {
+    //             std.debug.print(f.name ++ " {s}\n", .{@as(f.type, @field(entry, f.name))});
+    //         }
+    //     }
+    // }
 }
 
 fn getCommandArgs(allocator: std.mem.Allocator) ![]const [:0]u8 {

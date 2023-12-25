@@ -26,6 +26,7 @@ pub const Remover = struct {
     }
 
     pub fn remove(self: Remover, path: []const u8) !void {
+        try self.createInfo(path);
         const stat = try std.fs.cwd().statFile(path);
         switch (stat.kind) {
             .directory => {
@@ -40,7 +41,6 @@ pub const Remover = struct {
                 return error.TargetNotSupported;
             },
         }
-        try self.createInfo(path);
         const file_name = std.fs.path.basename(path);
         var bin_dir = try self.trash_dir.openDir("files", .{});
         const bin_path = try bin_dir.realpathAlloc(self.allocator, ".");
@@ -54,31 +54,44 @@ pub const Remover = struct {
         try std.fs.renameAbsolute(path, destination);
     }
 
+    // used after createInfo method invoked
     pub fn createDirCache(self: Remover, path: []const u8) !void {
         var file = try self.trash_dir.createFile("directorysizes", .{
             .truncate = false,
         });
-        const tuple = try getDirCache(path);
+        var target_dir = try std.fs.cwd().openIterableDir(path, .{});
         const file_name = std.fs.path.basename(path);
-        const cache_str = try std.fmt.allocPrint(self.allocator, "{d} {d} {s}\n", .{ tuple[0], tuple[1], file_name });
+        const trash_path = try self.trash_dir.realpathAlloc(self.allocator, ".");
+        const info_path = std.fmt.allocPrint(self.allocator, "{}/info/{}.{}", .{ trash_path, file_name, "trashinfo" });
+        var info_file = try std.fs.cwd().openFile(info_path, .{});
+        const mtime = getInfoModifiedTime(&info_file);
+        const dir_size = calculateDirSize(&target_dir);
+        const cache_str = try std.fmt.allocPrint(self.allocator, "{d} {d} {s}\n", .{ dir_size, mtime, file_name });
         _ = try file.write(cache_str);
         defer {
+            target_dir.close();
+            self.allocator.free(trash_path);
+            self.allocator.free(info_path);
+            info_file.close();
             file.close();
             self.allocator.free(cache_str);
         }
     }
 
-    // return (file_size, modified_time)
-    // it is important to know that the modified_time is the time when dir. modified in $TRASH/files, not the inode.modified_time
-    // but this function is used to move the file to trash, so just return current timestamp
-    // it is used to calculate the directory size
-    fn getDirCache(path: []const u8) !struct { u64, u64 } {
-        var dir = try std.fs.cwd().openDir(path, .{});
-        defer {
-            dir.close();
-        }
-        const dir_stat = try dir.statFile(".");
-        return .{ dir_stat.size, @intCast(std.time.timestamp()) };
+    fn getInfoModifiedTime(file: *File) !u64 {
+        const stat = try file.stat();
+        const result = @divTrunc(stat.mtime, std.time.ns_per_ms);
+        return @intCast(result);
+    }
+
+    fn calculateDirSize(dir: *std.fs.IterableDir, allocator: std.mem.Allocator) !u64 {
+        var size = @as(u64, 0);
+
+        const stat = try dir.dir.stat();
+        size += stat.size;
+        var walker = try dir.walk(allocator);
+        _ = walker;
+        return size;
     }
 
     fn createInfo(self: Remover, path: []const u8) !void {
